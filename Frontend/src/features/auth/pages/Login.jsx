@@ -1,11 +1,12 @@
 import React,{useState} from 'react'
 import { useNavigate, Link } from 'react-router'
-import '../services/auth.form.scss'
-// import { useAuth } from '../hooks/useAuth'
+import '../auth.form.scss'
+import { useAuth } from '../hooks/useAuth'
+
 
 const Login = () => {
 
-    // const { loading, handleLogin } = useAuth()
+    const { loading, handleLogin } = useAuth()
     const navigate = useNavigate()
 
     const [ email, setEmail ] = useState("")
@@ -14,12 +15,13 @@ const Login = () => {
     const handleSubmit = async (e) => {
         e.preventDefault()
         await handleLogin({email,password})
+        // after loggin you will reach the home page right 
         navigate('/')
     }
 
-    // if(loading){
-    //     return (<main><h1>Loading.......</h1></main>)
-    // }
+    if(loading) {
+        return (<main><h1>Loading.......</h1></main>)
+    }
 
 
     return (
