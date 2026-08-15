@@ -1,5 +1,5 @@
 const jwt=require("jsonwebtoken");
-
+const blackListModel=require("../models/blacklist")
 
 async function authMiddleware(req,res,next) {
   const token=req.cookies.token;

@@ -1,5 +1,5 @@
 import {router} from './app.routes.jsx'
-import {RouterProvider} from 'react-router'
+import {RouterProvider} from 'react-router-dom'
 import { AuthProvider } from './features/auth/auth.context.jsx'
 function App() {
 

@@ -1,0 +1,95 @@
+{
+  matchScore: 96,
+  technicalQuestions: [
+    {
+      question: 'In your Real-Time Collaboration Platform, you used Socket.IO. Can you explain the difference between WebSockets and standard HTTP communication, and how Socket.IO handles connection fallbacks?',
+      intention: "To evaluate the candidate's deep understanding of real-time protocols, asynchronous communication, and the underlying tech stack of their projects.",
+      answer: 'The candidate should explain that HTTP is a stateless, request-response protocol initiated by the client, whereas WebSockets provide a persistent, bi-directional, full-duplex connection over a single TCP connection, ideal for real-time data flow like chat. They should mention that Socket.IO starts with HTTP long-polling to establish a reliable baseline connection, and then upgrades to WebSockets if supported by the client/server environment. They should also briefly touch upon connection state management, heartbeats, and room/namespace capabilities.'
+    },
+    {
+      question: "In your ShopSphere project, you chose Redux Toolkit for state management. Why did you choose Redux Toolkit over React's native Context API, and how do you structure your store and slice logic for complex operations like managing a cart?",
+      intention: "To assess the candidate's proficiency in advanced React state management, application architecture, and their ability to justify architectural choices.",
+      answer: "The candidate should compare Context API (best for static or low-frequency updates like themes/locales due to re-rendering issues) with Redux Toolkit (highly optimized for high-frequency, complex state mutations and large-scale applications). They should describe defining a 'cartSlice' containing state properties (items, totalQuantity, totalAmount) and reducers (addItem, removeItem, clearCart). They should also mention utilizing 'createAsyncThunk' or RTK Query for calling API endpoints to sync the cart state with the backend database."
+    },
+    {
+      question: 'Explain the concept of asynchronous programming in JavaScript and the event loop. How do Promise.all() and Promise.allSettled() differ, and when would you use each in a backend Node.js application?',
+      intention: "To evaluate the candidate's core JavaScript foundational knowledge, understanding of the Node.js runtime, and ability to write non-blocking asynchronous code.",
+      answer: "The candidate should describe the Event Loop, including the Call Stack, Web/Node APIs, Callback/Macrotask Queue, and Microtask Queue (where promises reside). They must explain that JavaScript is single-threaded but achieves non-blocking concurrency via this mechanism. For Promises: Promise.all() rejects immediately if any of the input promises reject. In contrast, Promise.allSettled() waits for all promises to resolve or reject and returns an array of outcome objects. Promise.all() is ideal when all operations are interdependent (e.g., fetching vital sequential user configuration), whereas Promise.allSettled() is better when you want to execute multiple independent tasks (e.g., sending multiple notification emails) where a single failure shouldn't cancel the others."
+    },
+    {
+      question: 'You have listed experience with both MongoDB and PostgreSQL. If you were refactoring the database schema for ShopSphere, when would you use MongoDB, and when would you migrate to PostgreSQL?',
+      intention: 'To test database schema design skills, understanding of ACID properties, and the trade-offs between SQL and NoSQL databases.',
+      answer: 'The candidate should highlight that PostgreSQL (relational) is exceptional for complex queries, strict transactional integrity (ACID compliance required for payment systems, order histories, and inventories), and normalized schemas. MongoDB (document-based NoSQL) is ideal for flexible, dynamic schemas (e.g., product catalogs with dynamic attributes, user-generated reviews, or fast-changing product models), ease of horizontal scaling, and rapid prototyping. An excellent response would suggest a hybrid approach: PostgreSQL for transactions/orders/users and MongoDB for dynamic catalog data.'
+    }
+  ],
+  behavioralQuestions: [
+    {
+      question: 'Describe a challenging issue you encountered during your internship at TechNova Solutions. How did you identify the root cause, and how did you resolve it?',
+      intention: 'To evaluate problem-solving capabilities, technical debugging approaches, and how the candidate operates under real-world project constraints.',
+      answer: 'The candidate should utilize the STAR (Situation, Task, Action, Result) method. They should describe a real bug or performance bottleneck (e.g., slow API response times or race conditions in authentication), detail their structured debugging approach (using Chrome DevTools, Postman, server logs, or profiling), explain the implementation of the fix, and highlight the measurable positive outcome of their efforts.'
+    },
+    {
+      question: 'You have successfully balanced being an undergraduate, maintaining a high CGPA, doing an internship, and building complex side projects. How do you prioritize your tasks and manage your time effectively?',
+      intention: 'To assess time management, organizational skills, work ethic, and adaptability under pressure.',
+      answer: 'The candidate should explain their methodology for time blocking, task prioritization (e.g., using tools like Notion, Trello, or simple calendar scheduling), and open communication. They should showcase their capability to manage academic obligations while staying committed to real-time engineering contributions, showing that they can balance delivery timelines with learning objectives.'
+    }
+  ],
+  skillGaps: [
+    {
+      skill: 'Automated Testing (Unit & Integration Testing using Jest / React Testing Library)',
+      severity: 'medium'
+    },
+    {
+      skill: 'CI/CD & Production Deployment (e.g., GitHub Actions, AWS, or GCP)',
+      severity: 'low'
+    }
+  ],
+  preparationPlan: [
+    {
+      day: 1,
+      focus: 'Core JavaScript & Asynchronous Programming',
+      tasks: [
+        'Deep dive into closures, lexical scope, hoisting, prototypes, and ES6+ features.',
+        'Master the Event Loop, microtasks (Promises/Process.nextTick), macrotasks (setTimeout/setInterval), and asynchronous error handling.',
+        'Write custom polyfills for Array.prototype.map, filter, reduce, and Promise.all.'
+      ]
+    },
+    {
+      day: 2,
+      focus: 'React.js & State Management',
+      tasks: [
+        'Review the Virtual DOM, reconciliation, and key React Hooks (useState, useEffect, useMemo, useCallback, useRef).',
+        'Practice building custom React hooks to handle reusable logic (like fetching data or handling form state).',
+        'Study the architecture of Redux Toolkit: actions, reducers, configureStore, createSlice, and AsyncThunks. Practice optimizing re-renders in React components.'
+      ]
+    },
+    {
+      day: 3,
+      focus: 'Node.js, Express & REST APIs',
+      tasks: [
+        'Review Node.js architecture (v8 engine, libuv, event-driven, non-blocking I/O model).',
+        'Practice building robust REST API endpoints in Express, incorporating custom middleware for validation, rate-limiting, and global error handling.',
+        'Deep dive into security principles: implementation of JWT authentication, secure handling of HTTP-only cookies, CORS configuration, and security headers using Helmet.'
+      ]
+    },
+    {
+      day: 4,
+      focus: 'Database Systems & Real-Time Communication',
+      tasks: [
+        'Practice schema design for MongoDB (referencing vs embedding patterns, writing aggregation queries) and PostgreSQL (normalization, foreign keys, joins).',
+        'Implement or review WebSockets and Socket.IO workflows (connection lifecycle, event emission, rooms, handling reconnections).',
+        'Review relational database indexing concepts and performance optimization techniques.'
+      ]
+    },
+    {
+      day: 5,
+      focus: 'Data Structures, Systems, and Mock Interviews',
+      tasks: [
+        'Solve 3-5 Medium-level LeetCode problems covering HashMaps, Two Pointers, and Sliding Window to sharpen DSA skills.',
+        'Implement basic unit and integration tests using Jest and Supertest for an Express endpoint.',
+        'Conduct a simulated mock interview focusing on describing past projects (ShopSphere, Collaboration Platform) and preparing STAR-based behavioral responses.'
+      ]
+    }
+  ],
+  title: 'Software Development Intern'
+}

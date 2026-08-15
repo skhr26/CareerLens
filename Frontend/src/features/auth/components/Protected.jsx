@@ -1,5 +1,5 @@
 import { useAuth } from "../hooks/useAuth";
-import { Navigate } from "react-router";
+import { Navigate } from "react-router-dom";
 import React from 'react'
 const Protected = ({children}) => {
   // ye ek tarah se frontend ka middle ware hai jo hame agar user nhi mila to aage nhi badhne dega 
@@ -11,6 +11,7 @@ const Protected = ({children}) => {
     if(loading){
         return (<main><h1>Loading...</h1></main>)
     }
+    console.log(user)
 
     if(!user){
         return <Navigate to={'/login'} />

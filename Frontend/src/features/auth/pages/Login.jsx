@@ -1,5 +1,5 @@
 import React,{useState} from 'react'
-import { useNavigate, Link } from 'react-router'
+import { useNavigate, Link } from 'react-router-dom'
 import '../auth.form.scss'
 import { useAuth } from '../hooks/useAuth'
 
@@ -14,9 +14,8 @@ const Login = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault()
-        await handleLogin({email,password})
-        // after loggin you will reach the home page right 
-        navigate('/')
+        const res = await handleLogin({email,password})
+        if (res && res.user) navigate('/')
     }
 
     if(loading) {

@@ -103,6 +103,7 @@ const logout=async (req,res)=> {
 
 
 const getme=async (req,res)=> {
+  // basically this function is used to get the user details from the token which is stored in the cookie and then we will send the user details to the frontend
   const {id,username}=req.user;
 
   const user=await userModel.findById(id);
