@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react'
-import '../style/interview.scss'
+import React, { useState } from 'react'
+import '../styles/interview.scss'
 import { useInterview } from '../hooks/useInterview.js'
-import { useNavigate, useParams } from 'react-router'
+import { useParams } from 'react-router-dom'
 
 
 
@@ -65,11 +65,11 @@ const Interview = () => {
     const { report, getReportById, loading, getResumePdf } = useInterview()
     const { interviewId } = useParams()
 
-    useEffect(() => {
-        if (interviewId) {
-            getReportById(interviewId)
-        }
-    }, [ interviewId ])
+    // useEffect(() => {
+    //     if (interviewId) {
+    //         getReportById(interviewId)
+    //     }
+    // }, [ interviewId ])
 
 
 

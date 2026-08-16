@@ -1,7 +1,7 @@
 import { getAllInterviewReports, generateInterviewReport, getInterviewReportById, generateResumePdf } from "../services/interview.api"
 import { useContext, useEffect } from "react"
 import { InterviewContext } from "../interviewContext"
-import { useParams } from "react-router"
+import { useParams } from "react-router-dom"
 
 
 export const useInterview = () => {
@@ -88,5 +88,4 @@ export const useInterview = () => {
     }, [ interviewId ])
 
     return { loading, report, reports, generateReport, getReportById, getReports, getResumePdf }
-
 }
