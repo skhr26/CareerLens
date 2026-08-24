@@ -65,9 +65,11 @@ export const useInterview = () => {
         let response = null
         try {
             response = await generateResumePdf({ interviewReportId })
+            // here we create a blob data and then convert it into pdf 
             const url = window.URL.createObjectURL(new Blob([ response ], { type: "application/pdf" }))
-            const link = document.createElement("a")
-            link.href = url
+            const link = document.createElement("a");
+            link.href = url;
+            // it tell the browser to download the file with the given name  
             link.setAttribute("download", `resume_${interviewReportId}.pdf`)
             document.body.appendChild(link)
             link.click()

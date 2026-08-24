@@ -2,22 +2,46 @@ import React, { useState, useRef } from 'react'
 import "../styles/home.scss"
 import { useInterview } from '../hooks/useInterview'
 import { useNavigate } from 'react-router-dom'
+import { fetchMatchingJobsApi } from '../../jobs/services/job.api'
 
 const Home = () => {
 
-    const { loading, generateReport,reports } = useInterview()
+    const { loading, generateReport, reports } = useInterview()
     const [ jobDescription, setJobDescription ] = useState("")
     const [ selfDescription, setSelfDescription ] = useState("")
+    const [ findingJobs, setFindingJobs ] = useState(false)
     const resumeInputRef = useRef()
-
-    // it's a UI that we have made using the ai
 
     const navigate = useNavigate()
 
     const handleGenerateReport = async () => {
-        const resumeFile = resumeInputRef.current.files[ 0 ]
+        const resumeFile = resumeInputRef.current?.files[ 0 ]
         const data = await generateReport({ jobDescription, selfDescription, resumeFile });
         navigate(`/report/${data._id}`)
+    }
+
+    const handleJobs = async () => {
+        const resumeFile = resumeInputRef.current?.files[ 0 ]
+        if (!resumeFile && (!selfDescription || !selfDescription.trim())) {
+            alert("Please upload a resume or enter a self-description to find matching jobs.")
+            return
+        }
+
+        setFindingJobs(true)
+        try {
+            const data = await fetchMatchingJobsApi({ selfDescription, resumeFile })
+            navigate('/jobs', {
+                state: {
+                    jobs: data.jobs,
+                    searchQuery: data.searchQuery
+                }
+            })
+        } catch (error) {
+            console.error("Error finding jobs:", error)
+            alert(error.response?.data?.message || "Failed to find matching jobs. Please try again.")
+        } finally {
+            setFindingJobs(false)
+        }
     }
 
     if (loading) {
@@ -51,6 +75,7 @@ const Home = () => {
                             <span className='badge badge--required'>Required</span>
                         </div>
                         <textarea
+                            value={jobDescription}
                             onChange={(e) => { setJobDescription(e.target.value) }}
                             className='panel__textarea'
                             placeholder={`Paste the full job description here...\ne.g. 'Senior Frontend Engineer at Google requires proficiency in React, TypeScript, and large-scale system design...'`}
@@ -94,6 +119,7 @@ const Home = () => {
                         <div className='self-description'>
                             <label className='section-label' htmlFor='selfDescription'>Quick Self-Description</label>
                             <textarea
+                                value={selfDescription}
                                 onChange={(e) => { setSelfDescription(e.target.value) }}
                                 id='selfDescription'
                                 name='selfDescription'
@@ -107,20 +133,29 @@ const Home = () => {
                             <span className='info-box__icon'>
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" stroke="#1a1f27" strokeWidth="2" /><line x1="12" y1="16" x2="12.01" y2="16" stroke="#1a1f27" strokeWidth="2" /></svg>
                             </span>
-                            <p>Either a <strong>Resume</strong> or a <strong>Self Description</strong> is required to generate a personalized plan.</p>
+                            <p>Either a <strong>Resume</strong> or a <strong>Self Description</strong> is required to generate a personalized plan or find matching jobs.</p>
                         </div>
                     </div>
                 </div>
 
                 {/* Card Footer */}
                 <div className='interview-card__footer'>
-                    <span className='footer-info'>AI-Powered Strategy Generation &bull; Approx 30s</span>
-                    <button
-                        onClick={handleGenerateReport}
-                        className='generate-btn'>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" /></svg>
-                        Generate My Interview Strategy
-                    </button>
+                    <span className='footer-info'>AI-Powered Strategy Generation &amp; Multi-Platform Job Finder &bull; Approx 30s</span>
+                    <div className='action-buttons'>
+                        <button
+                            onClick={handleJobs}
+                            disabled={findingJobs}
+                            className='generate-btn'>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" /></svg>
+                            {findingJobs ? 'Finding Jobs...' : 'Find me Jobs'}
+                        </button>
+                        <button
+                            onClick={handleGenerateReport}
+                            className='generate-btn'>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" /></svg>
+                            Generate My Interview Strategy
+                        </button>
+                    </div>
                 </div>
             </div>
 
