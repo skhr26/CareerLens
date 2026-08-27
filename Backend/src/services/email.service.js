@@ -53,9 +53,13 @@ async function createTransporter() {
 }
 
 /**
- * Sends real email to target recipient using Nodemailer
+ * Sends real email to target recipient using Nodemailer.
+ *
+ * `attachments` uses nodemailer's own shape: `[{ filename, content: Buffer, contentType }]`.
+ * Without it a founder received a pitch with nothing to review, which is the whole point
+ * of the message.
  */
-async function sendRealEmail({ toEmail, subject, body }) {
+async function sendRealEmail({ toEmail, subject, body, attachments = [] }) {
     if (!toEmail || !toEmail.trim()) {
         throw new Error("Recipient email address is required.");
     }
@@ -64,18 +68,26 @@ async function sendRealEmail({ toEmail, subject, body }) {
 
     const fromAddress = process.env.EMAIL_USER || process.env.SMTP_USER || '"CareerLens AI" <no-reply@careerlens.ai>';
 
+    const safeBody = String(body || "");
+
     const mailOptions = {
         from: fromAddress,
         to: toEmail,
         subject: subject || "Job Application",
-        text: body,
+        text: safeBody,
         html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            ${body.replace(/\n/g, "<br/>")}
-        </div>`
+            ${safeBody.replace(/\n/g, "<br/>")}
+        </div>`,
+        // Omitted entirely when empty — some SMTP transports treat an empty array as a
+        // malformed multipart body.
+        ...(attachments.length ? { attachments } : {})
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`[Email Service] Email sent successfully to ${toEmail}. Message ID: ${info.messageId}`);
+    console.log(
+        `[Email Service] Email sent successfully to ${toEmail}. Message ID: ${info.messageId}` +
+        (attachments.length ? ` (${attachments.length} attachment: ${attachments.map(file => file.filename).join(", ")})` : "")
+    );
 
     // If Ethereal test account was used, generate preview link
     const previewUrl = nodemailer.getTestMessageUrl(info);

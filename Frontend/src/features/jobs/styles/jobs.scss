@@ -63,6 +63,89 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
                 border: 1px solid rgba($accent, 0.25);
             }
         }
+
+        .jobs-notice {
+            margin-top: 0.75rem;
+            font-size: 0.85rem;
+            color: #fbbf24;
+            background: rgba(251, 191, 36, 0.08);
+            border: 1px solid rgba(251, 191, 36, 0.25);
+            border-radius: 0.5rem;
+            padding: 0.55rem 0.85rem;
+        }
+    }
+
+    // Segmented All / Jobs / Internships filter.
+    .jobs-tabs {
+        display: flex;
+        gap: 0.3rem;
+        padding: 0.3rem;
+        background: $bg-card;
+        border: 1px solid $border-color;
+        border-radius: 0.65rem;
+
+        .jobs-tab {
+            background: transparent;
+            border: none;
+            color: $text-muted;
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: 600;
+            padding: 0.5rem 1.1rem;
+            border-radius: 0.45rem;
+            cursor: pointer;
+            transition: background 0.18s, color 0.18s;
+
+            &:hover {
+                color: $text-primary;
+            }
+
+            &--active {
+                background: rgba($accent, 0.15);
+                color: $accent;
+            }
+        }
+    }
+
+    .jobs-section {
+        width: 100%;
+        max-width: 1000px;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+
+        &__title {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin: 0;
+            padding-bottom: 0.6rem;
+            border-bottom: 1px solid $border-color;
+        }
+
+        &__count {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: $accent;
+            background: rgba($accent, 0.12);
+            border: 1px solid rgba($accent, 0.25);
+            padding: 0.1rem 0.5rem;
+            border-radius: 1rem;
+        }
+
+        // Rendered instead of hiding the section, so an empty result is stated rather
+        // than looking like the feature is missing.
+        &__empty {
+            margin: 0;
+            font-size: 0.88rem;
+            color: $text-muted;
+            background: $bg-card;
+            border: 1px dashed $border-color;
+            border-radius: 0.65rem;
+            padding: 1.1rem 1.25rem;
+        }
     }
 
     .jobs-grid {
@@ -128,6 +211,18 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
                     border: 1px solid rgba(234, 88, 12, 0.35);
                 }
 
+                &--indeed {
+                    background: rgba(37, 99, 235, 0.18);
+                    color: #818cf8;
+                    border: 1px solid rgba(37, 99, 235, 0.35);
+                }
+
+                &--internship {
+                    background: rgba(168, 85, 247, 0.16);
+                    color: #c084fc;
+                    border: 1px solid rgba(168, 85, 247, 0.35);
+                }
+
                 &--direct {
                     background: rgba($accent, 0.15);
                     color: $accent;
@@ -145,10 +240,26 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
             .company-info {
                 display: flex;
                 align-items: center;
+                flex-wrap: wrap;
                 gap: 0.85rem;
                 font-size: 0.85rem;
                 color: $text-muted;
             }
+        }
+
+        // Platform + Internship badges sit on one row above the title.
+        &__badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+
+        // Shown when duplicates were merged, so one card does not read as a lost result.
+        &__also-on {
+            margin: 0;
+            font-size: 0.78rem;
+            color: $text-muted;
+            font-style: italic;
         }
 
         &__score {
@@ -232,6 +343,15 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
 
                 &:hover {
                     color: $text-primary;
+                }
+
+                &--disabled {
+                    opacity: 0.45;
+                    cursor: not-allowed;
+
+                    &:hover {
+                        color: $text-muted;
+                    }
                 }
             }
 
@@ -377,6 +497,134 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
                     background: rgba($accent, 0.1);
                 }
             }
+
+            // Resume attachment picker
+            .resume-picker {
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+                background: $bg-panel;
+                border: 1px solid $border-color;
+                border-radius: 0.6rem;
+                padding: 0.9rem 1rem;
+
+                &__label {
+                    font-size: 0.825rem;
+                    font-weight: 600;
+                    color: $text-primary;
+                }
+
+                &__upload {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.35rem;
+                    padding-left: 0.25rem;
+
+                    input[type="file"] {
+                        font-size: 0.8rem;
+                        color: $text-muted;
+                    }
+                }
+
+                &__filename {
+                    font-size: 0.78rem;
+                    color: #4ade80;
+                }
+
+                &__preview {
+                    align-self: flex-start;
+                    background: $bg-input;
+                    color: $text-primary;
+                    border: 1px solid $border-color;
+                    padding: 0.5rem 0.9rem;
+                    border-radius: 0.5rem;
+                    font-family: inherit;
+                    font-size: 0.8rem;
+                    font-weight: 600;
+                    cursor: pointer;
+
+                    &:hover:not(:disabled) {
+                        border-color: rgba($accent, 0.5);
+                    }
+
+                    &:disabled {
+                        opacity: 0.55;
+                        cursor: progress;
+                    }
+                }
+            }
+
+            .resume-option {
+                display: flex;
+                align-items: flex-start;
+                gap: 0.6rem;
+                background: $bg-input;
+                border: 1px solid $border-color;
+                border-radius: 0.5rem;
+                padding: 0.65rem 0.8rem;
+                cursor: pointer;
+                transition: border-color 0.18s, background 0.18s;
+
+                input[type="radio"] {
+                    margin-top: 0.15rem;
+                    accent-color: $accent;
+                    cursor: inherit;
+                }
+
+                span {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.15rem;
+                }
+
+                strong {
+                    font-size: 0.85rem;
+                    font-weight: 600;
+                    color: $text-primary;
+                }
+
+                em {
+                    font-style: normal;
+                    font-size: 0.76rem;
+                    line-height: 1.4;
+                    color: $text-muted;
+                }
+
+                &--active {
+                    border-color: rgba($accent, 0.5);
+                    background: rgba($accent, 0.07);
+                }
+
+                &--disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+            }
+        }
+
+        &__status,
+        &__error {
+            font-size: 0.85rem;
+            line-height: 1.45;
+            border-radius: 0.5rem;
+            padding: 0.6rem 0.85rem;
+
+            a {
+                color: #60a5fa;
+                text-decoration: underline;
+            }
+        }
+
+        &__status {
+            color: #4ade80;
+            background: rgba(34, 197, 94, 0.08);
+            border: 1px solid rgba(34, 197, 94, 0.25);
+        }
+
+        &__error {
+            color: #f87171;
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.25);
         }
 
         &__footer {
@@ -385,6 +633,7 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
             display: flex;
             align-items: center;
             justify-content: flex-end;
+            flex-wrap: wrap;
             gap: 0.75rem;
 
             .btn-secondary {
@@ -393,6 +642,7 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
                 border: 1px solid $border-color;
                 padding: 0.6rem 1.15rem;
                 border-radius: 0.5rem;
+                font-family: inherit;
                 font-size: 0.85rem;
                 font-weight: 600;
                 cursor: pointer;
@@ -408,12 +658,20 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
                 border: none;
                 padding: 0.6rem 1.25rem;
                 border-radius: 0.5rem;
+                font-family: inherit;
                 font-size: 0.85rem;
                 font-weight: 600;
                 cursor: pointer;
 
-                &:hover {
+                &:hover:not(:disabled) {
                     opacity: 0.9;
+                }
+
+                // Send is blocked until the chosen attachment actually exists, so the
+                // disabled state has to read as deliberate rather than broken.
+                &:disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
                 }
             }
         }

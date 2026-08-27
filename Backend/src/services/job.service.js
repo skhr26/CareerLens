@@ -1,11 +1,12 @@
 const { GoogleGenAI } = require("@google/genai");
-const { zodToJsonSchema } = require("zod-to-json-schema");
 const { z } = require("zod");
-const { scrapeMultiPlatformJobs, normalizeJobLink } = require("./scraper.service");
+const { scrapeJobsAndInternships } = require("./scraper.service");
 
 const ai = new GoogleGenAI({
     apiKey: process.env.GOOGLE_GENAI_API_KEY
 });
+
+const MODEL = "gemini-3.5-flash";
 
 // Schema for cold email response
 const coldEmailJsonSchema = {
@@ -24,327 +25,451 @@ const coldEmailJsonSchema = {
 };
 const coldEmailSchema = z.fromJSONSchema(coldEmailJsonSchema);
 
-// Schema for job matching scoring & enrichment
+/**
+ * Shape returned to the client. Fields the source did not publish stay null —
+ * the UI renders them as "Not specified" rather than showing an invented value.
+ */
+const postingSchema = z.object({
+    id: z.string(),
+    kind: z.enum(["job", "internship"]),
+    title: z.string(),
+    company: z.string(),
+    platform: z.string(),
+    // Other boards the same posting was found on, collected while deduplicating.
+    alsoOn: z.array(z.string()),
+    location: z.string().nullable(),
+    exp: z.string().nullable(),
+    employmentType: z.string().nullable(),
+    matchScore: z.number().min(0).max(100),
+    scoredBy: z.enum(["ai", "keyword-overlap"]),
+    summary: z.string(),
+    keyRequirements: z.array(z.string()),
+    jobDescription: z.string().nullable(),
+    salaryRange: z.string().nullable(),
+    postedAt: z.string().nullable(),
+    ageDays: z.number().nullable(),
+    link: z.string().url()
+});
+
 const jobMatchResultSchema = z.object({
-    searchQuery: z.string().describe("Target role search term extracted from candidate profile"),
-    jobs: z.array(
-        z.object({
-            id: z.string(),
-            title: z.string(),
-            company: z.string(),
-            platform: z.string(),
-            location: z.string(),
-            exp: z.string(),
-            matchScore: z.number().min(0).max(100),
-            summary: z.string().describe("Reasoning why this job matches candidate profile"),
-            keyRequirements: z.array(z.string()),
-            jobDescription: z.string(),
-            salaryRange: z.string(),
-            link: z.string()
-        })
-    )
+    searchQuery: z.string(),
+    jobs: z.array(postingSchema),
+    internships: z.array(postingSchema)
 });
 
 /**
- * Helper to safely extract dynamic numeric match scores from strings or numbers
+ * What the model is allowed to produce. It never returns a title, company or URL,
+ * so it cannot invent a posting — it only scores and explains the ones we scraped.
  */
-function parseMatchScore(val, fallbackIdx = 0) {
-    if (typeof val === "number" && !isNaN(val)) {
-        return Math.min(98, Math.max(55, Math.round(val)));
-    }
-    if (typeof val === "string") {
-        const num = parseInt(val.replace(/[^0-9]/g, ""), 10);
-        if (!isNaN(num)) {
-            return Math.min(98, Math.max(55, num));
+const aiScoringJsonSchema = {
+    type: "object",
+    properties: {
+        matches: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    link: { type: "string", description: "The link of the scraped job, copied verbatim." },
+                    matchScore: { type: "number", description: "0-100, based strictly on real overlap with the resume." },
+                    summary: { type: "string", description: "Which of the candidate's skills/experience actually overlap with this posting." },
+                    keyRequirements: { type: "array", items: { type: "string" }, description: "Requirements stated in the posting text only. Empty if the posting text does not list any." }
+                },
+                required: ["link", "matchScore", "summary"]
+            }
         }
-    }
-    const baseScores = [94, 88, 76, 91, 68, 83, 95, 72, 89, 77, 93, 81];
-    return baseScores[fallbackIdx % baseScores.length];
+    },
+    required: ["matches"]
+};
+
+/* ------------------------------------------------------------------ *
+ * deterministic scoring (used when the model is unavailable)
+ * ------------------------------------------------------------------ */
+
+const SCORE_STOP_WORDS = new Set(["the", "and", "for", "with", "job", "role", "a", "an", "of", "in", "to"]);
+
+function termsOf(text) {
+    return String(text || "")
+        .toLowerCase()
+        .split(/[^a-z0-9+#.]+/)
+        .filter(word => word.length > 1 && !SCORE_STOP_WORDS.has(word));
 }
 
 /**
- * Ensures exact salary output: returns real salary if disclosed by recruiter/site, or "Not Disclosed"
+ * Real, explainable score: the share of the candidate's own terms that appear in
+ * the posting. This replaces the previous hardcoded [94, 88, 76, ...] fallback,
+ * which showed users confident percentages that meant nothing.
  */
-function generateDynamicSalaryRange(rawSalary) {
-    if (rawSalary && typeof rawSalary === "string" && rawSalary.trim().length > 3) {
-        const clean = rawSalary.trim();
-        if (/not disclosed/i.test(clean)) return "Not Disclosed";
-        if (clean !== "$90k - $120k" && (/\$|₹|€|£|lpa|k|yr|year|month/i.test(clean))) {
-            return clean;
-        }
-    }
-    return "Not Disclosed";
-}
-
-/**
- * Generates dynamic, realistic technical skill requirements tailored to specific job titles
- */
-function generateDynamicSkillsForJob(rawSkills, title = "", idx = 0, candidateSkills = []) {
-    if (Array.isArray(rawSkills) && rawSkills.length >= 2) {
-        const isStaticDefault = rawSkills.length === 3 && rawSkills.includes("React") && rawSkills.includes("Node.js") && rawSkills.includes("JavaScript");
-        if (!isStaticDefault) {
-            return rawSkills.map(String);
-        }
-    }
-
-    if (candidateSkills && candidateSkills.length >= 3) {
-        return candidateSkills.slice(0, 4).map(String);
-    }
-
-    const titleLower = title.toLowerCase();
-
-    if (titleLower.includes("frontend") || titleLower.includes("ui") || titleLower.includes("react")) {
-        const frontendSets = [
-            ["React.js", "TypeScript", "Redux Toolkit", "Tailwind CSS", "HTML5/CSS3"],
-            ["React.js", "JavaScript (ES6+)", "Next.js", "REST APIs", "CSS Modules"],
-            ["React.js", "TypeScript", "GraphQL", "Jest/RTL", "Webpack"],
-            ["React.js", "Tailwind CSS", "State Management", "Git", "Responsive Design"]
-        ];
-        return frontendSets[idx % frontendSets.length];
-    }
-
-    if (titleLower.includes("backend") || titleLower.includes("node") || titleLower.includes("api")) {
-        const backendSets = [
-            ["Node.js", "Express.js", "MongoDB", "PostgreSQL", "REST APIs"],
-            ["Node.js", "TypeScript", "Redis", "Docker", "Microservices"],
-            ["Express.js", "MongoDB", "JWT Auth", "Mongoose", "System Design"],
-            ["Node.js", "PostgreSQL", "Sequelize/Prisma", "RESTful APIs", "Git"]
-        ];
-        return backendSets[idx % backendSets.length];
-    }
-
-    if (titleLower.includes("python") || titleLower.includes("data") || titleLower.includes("ai") || titleLower.includes("ml")) {
-        const aiSets = [
-            ["Python", "FastAPI", "PostgreSQL", "Docker", "REST APIs"],
-            ["Python", "Pandas", "SQL", "Scikit-Learn", "Data Modeling"],
-            ["Python", "Django", "MongoDB", "Generative AI", "LangChain"],
-            ["Python", "PyTorch", "NumPy", "REST APIs", "Git"]
-        ];
-        return aiSets[idx % aiSets.length];
-    }
-
-    const fullStackSets = [
-        ["React.js", "Node.js", "MongoDB", "Express.js", "TypeScript"],
-        ["React.js", "Node.js", "PostgreSQL", "REST APIs", "Git"],
-        ["JavaScript (ES6+)", "React.js", "Express.js", "Redux Toolkit", "CSS3"],
-        ["Node.js", "React.js", "MongoDB", "Docker", "JWT Authentication"],
-        ["TypeScript", "React.js", "Node.js", "Tailwind CSS", "RESTful APIs"]
-    ];
-    return fullStackSets[idx % fullStackSets.length];
-}
-
-/**
- * Checks if a job explicitly shares at least 1 or 2 core technical keywords with the candidate profile
- */
-function hasKeywordOverlap(job, candidateSkills = [], searchQuery = "") {
+function scoreByOverlap(job, candidateSkills = [], searchQuery = "") {
     const candidateTerms = new Set([
-        ...candidateSkills.map(s => s.toLowerCase().trim()),
-        ...searchQuery.toLowerCase().split(/[^a-z0-9]+/g).filter(w => w.length > 2)
+        ...candidateSkills.flatMap(termsOf),
+        ...termsOf(searchQuery)
     ]);
+    if (!candidateTerms.size) return { score: 0, matched: [] };
 
-    const jobFullText = `${job.title} ${job.company} ${job.jobDescription} ${job.keyRequirements?.join(" ") || ""} ${job.summary}`.toLowerCase();
+    const haystack = [job.title, job.company, job.description, (job.skills || []).join(" ")]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
-    let matchCount = 0;
-    candidateTerms.forEach(term => {
-        if (term && jobFullText.includes(term)) {
-            matchCount++;
-        }
+    const matched = [...candidateTerms].filter(term => haystack.includes(term));
+    const ratio = matched.length / candidateTerms.size;
+
+    return { score: Math.round(ratio * 100), matched };
+}
+
+/* ------------------------------------------------------------------ *
+ * matching pipeline
+ * ------------------------------------------------------------------ */
+
+function normalizeKey(text) {
+    return String(text || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** Skills we can recognise in a resume without calling the model. */
+const KNOWN_SKILLS = [
+    "React.js", "React Native", "Next.js", "Vue.js", "Angular", "Svelte", "Redux", "Tailwind CSS",
+    "JavaScript", "TypeScript", "Node.js", "Express.js", "NestJS", "Deno",
+    "Python", "Django", "Flask", "FastAPI", "Java", "Spring Boot", "Kotlin", "Go", "Rust",
+    "C++", "C#", ".NET", "ASP.NET", "PHP", "Laravel", "Ruby", "Rails", "Swift",
+    "MongoDB", "PostgreSQL", "MySQL", "Redis", "SQLite", "Elasticsearch", "GraphQL", "REST API",
+    "Docker", "Kubernetes", "AWS", "Azure", "GCP", "Terraform", "Jenkins", "CI/CD", "Git",
+    "HTML", "CSS", "SASS", "Jest", "Cypress", "Playwright", "Selenium",
+    "Machine Learning", "TensorFlow", "PyTorch", "Pandas", "NumPy", "LangChain", "Generative AI"
+];
+
+const ROLE_PATTERNS = [
+    [/full[\s-]?stack/i, "Full Stack Developer"],
+    [/front[\s-]?end/i, "Frontend Developer"],
+    [/back[\s-]?end/i, "Backend Developer"],
+    [/dev[\s-]?ops|site reliability/i, "DevOps Engineer"],
+    [/data scien(ce|tist)/i, "Data Scientist"],
+    [/data engineer/i, "Data Engineer"],
+    [/machine learning|\bml\b|deep learning/i, "Machine Learning Engineer"],
+    [/mobile|android|ios|react native|flutter/i, "Mobile Developer"],
+    [/\bqa\b|test automation/i, "QA Engineer"],
+    [/ui\/ux|product design/i, "UI/UX Designer"],
+    [/cloud/i, "Cloud Engineer"],
+    [/security|cybersecurity|infosec/i, "Security Engineer"],
+    [/embedded/i, "Embedded Engineer"],
+    [/game/i, "Game Developer"],
+    [/blockchain|web3/i, "Web3 Developer"],
+    [/database|dbadmin/i, "Database Engineer"],
+    [/network/i, "Network Engineer"],
+    [/site[\s-]?reliability/i, "SRE"],
+    [/software/i, "Software Developer"],
+    [/developer|engineer|programmer|architect|sde/i, "Software Developer"]
+];
+
+/**
+ * Reads the target role and skills straight off the resume text.
+ *
+ * The model is better at this, but it is not always available — a 503 used to leave
+ * the search running as a bare "Software Developer" with no skills at all, which made
+ * every posting score identically. This keeps a degraded search meaningful.
+ */
+function extractProfileLocally(resume, selfDescription) {
+    const text = `${resume}\n${selfDescription}`;
+
+    const candidateSkills = KNOWN_SKILLS.filter(skill => {
+        const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(text);
     });
 
-    // Requires at least 1-2 matching core keywords
-    return matchCount >= 1;
+    const matchedRole = ROLE_PATTERNS.find(([pattern]) => pattern.test(text));
+
+    // When no explicit role pattern matches, infer a query from the dominant skill set.
+    let searchQuery;
+    if (matchedRole) {
+        searchQuery = matchedRole[1];
+    } else {
+        const skillSet = new Set(candidateSkills.map(s => s.toLowerCase()));
+        if (skillSet.has("react.js") || skillSet.has("vue.js") || skillSet.has("angular") || skillSet.has("svelte")) {
+            if (skillSet.has("node.js") || skillSet.has("express.js") || skillSet.has("mongodb")) {
+                searchQuery = "Full Stack Developer";
+            } else {
+                searchQuery = "Frontend Developer";
+            }
+        } else if (skillSet.has("node.js") || skillSet.has("express.js") || skillSet.has("django") || skillSet.has("flask") || skillSet.has("fastapi")) {
+            searchQuery = "Backend Developer";
+        } else if (skillSet.has("python") && (skillSet.has("tensorflow") || skillSet.has("pytorch") || skillSet.has("machine learning"))) {
+            searchQuery = "Machine Learning Engineer";
+        } else if (skillSet.has("docker") || skillSet.has("kubernetes") || skillSet.has("aws") || skillSet.has("terraform")) {
+            searchQuery = "DevOps Engineer";
+        } else {
+            searchQuery = "Software Developer";
+        }
+    }
+
+    return {
+        searchQuery,
+        candidateSkills
+    };
+}
+
+/** Retries the transient 429/503 responses the Gemini endpoint returns under load. */
+async function withRetry(operation, { attempts = 3, baseDelayMs = 1200, label = "gemini" } = {}) {
+    let lastError;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+            return await operation();
+        } catch (error) {
+            lastError = error;
+            const transient = /\b(429|503|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded)\b/i.test(error.message || "");
+            if (!transient || attempt === attempts) throw error;
+            const delay = baseDelayMs * 2 ** (attempt - 1);
+            console.warn(`[${label}] transient failure (attempt ${attempt}/${attempts}), retrying in ${delay}ms`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+    throw lastError;
+}
+
+async function extractCandidateProfile(resume, selfDescription) {
+    const local = extractProfileLocally(resume, selfDescription);
+
+    const prompt = `
+Analyze the candidate profile and extract:
+1. "query": Candidate's primary target job title (e.g. "Full Stack Developer", "Frontend Engineer", "Node.js Developer") in 2-4 words.
+2. "skills": Array of 3-8 core technical skills taken directly from the resume/self-description.
+
+Resume: ${resume || "Not provided"}
+Self Description: ${selfDescription || "Not provided"}
+
+Return JSON: {"query": "...", "skills": ["..."]}
+`;
+
+    try {
+        const response = await withRetry(
+            () => ai.models.generateContent({
+                model: MODEL,
+                contents: prompt,
+                config: { responseMimeType: "application/json" }
+            }),
+            { label: "profile-extract" }
+        );
+        const parsed = JSON.parse(response.text);
+        return {
+            searchQuery: parsed.query || local.searchQuery,
+            candidateSkills: Array.isArray(parsed.skills) && parsed.skills.length
+                ? parsed.skills.map(String)
+                : local.candidateSkills
+        };
+    } catch (error) {
+        console.error(`[job.service] profile extraction failed, parsed resume locally instead: ${error.message.slice(0, 120)}`);
+        console.log(`[job.service] local profile -> "${local.searchQuery}" with ${local.candidateSkills.length} skills`);
+        return local;
+    }
+}
+
+async function scoreJobsWithAi({ resume, selfDescription, jobs }) {
+    const prompt = `
+You are ranking real, already-scraped job postings against one candidate's profile.
+
+Candidate resume:
+${resume || "Not provided"}
+
+Candidate self-description:
+${selfDescription || "Not provided"}
+
+Scraped postings (JSON):
+${JSON.stringify(jobs.map(job => ({
+        link: job.link,
+        kind: job.kind || "job",
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        experience: job.experience,
+        employmentType: job.employmentType,
+        description: job.description,
+        skills: job.skills
+    })))}
+
+Rules:
+- Score every posting you can justify. A partial overlap is fine and should be included.
+- "matchScore" must reflect the real overlap between the posting and the resume. Do not assign arbitrary numbers.
+- Judge a posting whose "kind" is "internship" as an internship: a candidate having less experience than a full role would need is not a penalty there.
+- "summary" must name the specific overlapping skills or experience. No generic filler.
+- "keyRequirements" must only contain requirements present in that posting's own title/description/skills. Return an empty array if the posting text lists none. Never invent a tech stack.
+- Copy "link" verbatim from the posting you are scoring. It is the join key.
+- Do not add postings that are not in the list. Do not invent titles, companies or URLs.
+`;
+
+    const response = await withRetry(
+        () => ai.models.generateContent({
+            model: MODEL,
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: aiScoringJsonSchema
+            }
+        }),
+        { label: "job-scoring" }
+    );
+
+    const parsed = JSON.parse(response.text);
+    return Array.isArray(parsed.matches) ? parsed.matches : [];
 }
 
 /**
- * AI Service to extract target search query and enrich live scraped job listings
+ * Wellfound list pages carry no skill tags, so the model — given only an experience
+ * figure to work with — tends to echo it back as the single "key requirement".
+ * That is not a requirement chip, it is a field the card already renders on its own.
+ */
+function isRealRequirement(requirement, job) {
+    const value = clean(requirement);
+    if (!value || value.length < 2) return false;
+    if (/^\d+\+?\s*(years?|yrs?)\b/i.test(value)) return false;
+    if (/^(remote|onsite|hybrid|in office|full[\s-]?time|part[\s-]?time|contract|internship)\b/i.test(value)) return false;
+
+    const duplicatesField = [job.experience, job.location, job.salary]
+        .filter(Boolean)
+        .some(field => normalizeKey(field) === normalizeKey(value));
+
+    return !duplicatesField;
+}
+
+function clean(text) {
+    return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Indexes the model's scores by the scraped posting they belong to.
+ *
+ * The link is the join key. A match whose link resolves to nothing was never in the
+ * list we sent, which means the model invented it — those are dropped here, so an
+ * invented posting can never reach the user.
+ */
+function indexScoresByLink(scrapedPostings, aiMatches) {
+    const byLink = new Map(scrapedPostings.map(job => [job.link, job]));
+    const byTitleCompany = new Map(
+        scrapedPostings.map(job => [`${normalizeKey(job.title)}::${normalizeKey(job.company)}`, job])
+    );
+
+    const scoreFor = new Map();
+    for (const match of aiMatches) {
+        const target =
+            byLink.get(match.link) ||
+            byLink.get(String(match.link || "").split("?")[0]) ||
+            byTitleCompany.get(`${normalizeKey(match.title)}::${normalizeKey(match.company)}`);
+
+        if (!target) continue;
+        scoreFor.set(target.link, match);
+    }
+    return scoreFor;
+}
+
+/** Joins one scraped posting to its score, keeping every fact from the scrape. */
+function toClientPosting(job, index, kind, { scoreFor, candidateSkills, searchQuery }) {
+    const match = scoreFor.get(job.link);
+    const overlap = scoreByOverlap(job, candidateSkills, searchQuery);
+
+    const usedAi = Boolean(match) && Number.isFinite(Number(match.matchScore));
+    const rawScore = usedAi ? Number(match.matchScore) : overlap.score;
+
+    const summary = match && match.summary
+        ? String(match.summary)
+        : overlap.matched.length
+            ? `Overlaps with your profile on: ${overlap.matched.slice(0, 6).join(", ")}.`
+            : "No overlapping skills were detected from the posting text.";
+
+    // Real scraped tags first; the model's list only if the posting had none.
+    const keyRequirements = (job.skills && job.skills.length)
+        ? job.skills
+        : (match && Array.isArray(match.keyRequirements)
+            ? match.keyRequirements.map(String).filter(req => isRealRequirement(req, job))
+            : []);
+
+    return {
+        // Prefixed by kind so ids stay unique once both lists are rendered together.
+        id: `${kind}-${job.platform.toLowerCase().replace(/[^a-z]/g, "")}-${index + 1}`,
+        kind,
+        title: job.title,
+        company: job.company,
+        platform: job.platform,
+        alsoOn: Array.isArray(job.alsoOn) ? job.alsoOn : [],
+        location: job.location,
+        exp: job.experience,
+        employmentType: job.employmentType || null,
+        matchScore: Math.max(0, Math.min(100, Math.round(rawScore))),
+        scoredBy: usedAi ? "ai" : "keyword-overlap",
+        summary,
+        keyRequirements,
+        jobDescription: job.description,
+        salaryRange: job.salary,
+        postedAt: job.postedAt,
+        ageDays: Number.isFinite(job.ageDays) ? job.ageDays : null,
+        link: job.link
+    };
+}
+
+/**
+ * Highest score first, then freshest. Equal scores are common, and a 2-day-old posting
+ * is worth more to an applicant than an identically-scored 200-day-old one.
+ */
+function byScoreThenFreshness(a, b) {
+    if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore;
+    const ageA = a.ageDays === null ? Number.MAX_SAFE_INTEGER : a.ageDays;
+    const ageB = b.ageDays === null ? Number.MAX_SAFE_INTEGER : b.ageDays;
+    return ageA - ageB;
+}
+
+/**
+ * Finds jobs and internships for a candidate: extract profile -> scrape -> score -> rank.
+ *
+ * Every returned field is either scraped from the posting or a score/explanation
+ * derived from it. Postings the model invents are dropped, because the scraped set
+ * is the only source of titles, companies and links.
  */
 async function generateJobMatches({ resume = "", selfDescription = "" }) {
     if (!resume.trim() && !selfDescription.trim()) {
         throw new Error("Either resume or self description is required to find jobs.");
     }
 
-    // Step 1: Extract candidate's core domain / job title & tech skills directly from profile
-    const queryExtractPrompt = `
-Analyze the candidate profile and extract:
-1. "query": Candidate's primary target job title (e.g. "Full Stack Developer", "Frontend Engineer", "Node.js Developer") in 2-4 words.
-2. "skills": Array of 3-6 core technical skills extracted directly from candidate resume/self-description (e.g. ["React.js", "Node.js", "Express.js", "MongoDB", "TypeScript"]).
+    // Step 1 — candidate's target role and real skills.
+    const { searchQuery, candidateSkills } = await extractCandidateProfile(resume, selfDescription);
 
-Resume: ${resume || "Not provided"}
-Self Description: ${selfDescription || "Not provided"}
+    // Step 2 — live scrape, jobs and internships in one run.
+    const {
+        jobs: scrapedJobs,
+        internships: scrapedInternships,
+        diagnostics
+    } = await scrapeJobsAndInternships(searchQuery, candidateSkills);
 
-Return JSON object adhering to schema:
-{"query": "...", "skills": ["..."]}
-`;
+    const scraped = [...scrapedJobs, ...scrapedInternships];
 
-    let searchQuery = "Software Engineer";
-    let candidateSkills = ["React.js", "Node.js", "MongoDB", "Express.js"];
-    try {
-        const queryRes = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
-            contents: queryExtractPrompt,
-            config: {
-                responseMimeType: "application/json"
-            }
-        });
-        const parsed = JSON.parse(queryRes.text);
-        if (parsed.query) searchQuery = parsed.query;
-        if (Array.isArray(parsed.skills) && parsed.skills.length > 0) candidateSkills = parsed.skills;
-    } catch (e) {
-        console.error("Failed to extract query keyword via AI, defaulting to Software Engineer:", e.message);
+    if (!scraped.length) {
+        return {
+            searchQuery,
+            jobs: [],
+            internships: [],
+            diagnostics,
+            // Distinguishes "the scraper broke" from "nothing matched you".
+            scrapeFailed: !diagnostics.browserOk || diagnostics.errors.length > 0
+        };
     }
 
-    // Step 2: Run Puppeteer Web Scraper to fetch ALL available jobs across Naukri, LinkedIn, & Wellfound
-    let scrapedJobs = [];
-    try {
-        scrapedJobs = await scrapeMultiPlatformJobs(searchQuery, candidateSkills);
-    } catch (e) {
-        console.error("Error during web scraping:", e.message);
-    }
+    // Step 3 — score using keyword overlap (fast, reliable, no API dependency).
+    const scoredBy = "keyword-overlap";
 
-    // Step 3: Enrich ALL scraped jobs across all 3 platforms using Gemini AI
-    const enrichPrompt = `
-Analyze the given candidate resume and find job postings that are relevant to the candidate from the scraped raw jobs below.
+    // Step 4 — join scores onto the scraped facts.
+    const context = { scoreFor: new Map(), candidateSkills, searchQuery };
 
-The jobs do NOT need to be a 100% match with the resume. If a job has a meaningful match with some of the candidate's skills, technologies, experience, projects, or qualifications, it should still be included.
+    // Drop only genuine non-matches. The old filter also re-ran a keyword test over
+    // AI-written prose, which silently discarded valid postings.
+    const rank = (list, kind) => list
+        .map((job, index) => toClientPosting(job, index, job.kind || kind, context))
+        .filter(posting => posting.matchScore > 0)
+        .sort(byScoreThenFreshness);
 
-For every job:
-* Compare the job requirements with the candidate's resume.
-* Identify the skills/keywords that match.
-* Calculate a reasonable Match Score (%) based on how strongly the job matches the resume.
-* Rank all jobs from the highest Match Score to the lowest Match Score.
-* A partial match is completely acceptable. Do not exclude a job just because some requirements are missing.
+    const jobs = rank(scrapedJobs, "job");
 
-For example, if the resume contains React, JavaScript, Node.js, MongoDB and a job requires React, JavaScript, Node.js, PostgreSQL, this job should still be listed because there is significant overlap.
-However, the Match Score must be based on the actual overlap, not arbitrarily assigned.
+    console.log(
+        `[job.service] "${searchQuery}": ${scraped.length} scraped -> ` +
+        `${jobs.length} jobs returned (scoring: ${scoredBy})`
+    );
 
-### Most important requirement: ACCURACY
-Do not hallucinate anything.
-Only provide information that can be verified from the actual job posting array and the resume.
-
-For every job, make sure:
-Job Title + Company + Job Description + Job URL
-all correspond to the same actual job posting provided in the Scraped Raw Jobs JSON.
-
-Never provide:
-* A wrong job link
-* A company homepage instead of the job posting
-* A generic careers page instead of the specific job
-* A link to a different job
-* A fabricated job
-* A fabricated company
-* Fabricated requirements
-* Fabricated Match Scores
-
-If the exact job posting or URL cannot be verified from the Scraped Raw Jobs, do not include that job.
-Do not try to increase the number of results by guessing or generating uncertain information. It is better to return fewer accurate jobs than many incorrect jobs.
-
-Candidate Profile:
-Resume: ${resume || "Not provided"}
-Self Description: ${selfDescription || "Not provided"}
-
-Scraped Raw Jobs:
-${JSON.stringify(scrapedJobs)}
-
-Return JSON adhering strictly to this schema:
-{
-  "searchQuery": "${searchQuery}",
-  "jobs": [
-    {
-      "id": "job-1",
-      "title": "Job Title",
-      "company": "Company",
-      "platform": "Naukri.com",
-      "location": "Location",
-      "exp": "1-3 Yrs",
-      "matchScore": 92,
-      "summary": "Reasoning based on actual overlap",
-      "keyRequirements": ["React.js", "Node.js"],
-      "jobDescription": "Job Description",
-      "salaryRange": "Not Disclosed",
-      "link": "https://www.naukri.com/job-listings-example"
-    }
-  ]
-}
-`;
-
-    let rawParsed = { searchQuery, jobs: [] };
-    try {
-        const enrichmentRes = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
-            contents: enrichPrompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: zodToJsonSchema(jobMatchResultSchema)
-            }
-        });
-        rawParsed = JSON.parse(enrichmentRes.text);
-        if (Array.isArray(rawParsed)) {
-            rawParsed = { searchQuery, jobs: rawParsed };
-        }
-    } catch (err) {
-        console.error("AI Enrichment parsing error, using raw scraped dataset:", err.message);
-        rawParsed = { searchQuery, jobs: scrapedJobs };
-    }
-
-    // Step 4: SMART URL/TITLE ANCHORED MAPPING
-    const mappedJobs = [];
-    const aiJobsArray = Array.isArray(rawParsed.jobs) ? rawParsed.jobs : scrapedJobs;
-
-    aiJobsArray.forEach((aiJob, idx) => {
-        // Find the matching original scraped job to ensure absolute link accuracy
-        let sJob = scrapedJobs.find(sj => sj.link && aiJob.link && sj.link === aiJob.link) || 
-                   scrapedJobs.find(sj => sj.title === aiJob.title && sj.company === aiJob.company);
-        
-        // If Gemini hallucinated a job that doesn't exist in scrapedJobs, skip it completely.
-        if (!sJob) return;
-
-        const platform = sJob.platform || aiJob.platform || "Naukri.com";
-        const title = String(sJob.title || aiJob.title || `${searchQuery} Role`);
-        const company = String(sJob.company || aiJob.company || "Tech Company");
-        const location = String(sJob.location || aiJob.location || "Remote / Hybrid");
-        const exp = String(sJob.exp || aiJob.exp || "1-3 Yrs");
-
-        let bestLink = String(sJob.link || aiJob.link || "").trim();
-
-        if (platform === "LinkedIn" && !bestLink.includes("linkedin.com")) {
-            bestLink = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(title + " " + company)}`;
-        } else if (platform === "Wellfound" && !bestLink.includes("wellfound.com")) {
-            bestLink = `https://wellfound.com/jobs?q=${encodeURIComponent(title + " " + company)}`;
-        } else if (platform === "Naukri.com" && !bestLink.includes("naukri.com")) {
-            const role = title.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-");
-            bestLink = `https://www.naukri.com/${role || "software-engineer"}-jobs`;
-        }
-
-        mappedJobs.push({
-            id: String(aiJob.id || `job-${idx + 1}-${Math.random().toString(36).substring(2, 7)}`),
-            title,
-            company,
-            platform,
-            location,
-            exp,
-            matchScore: parseMatchScore(aiJob.matchScore, idx),
-            summary: String(aiJob.summary || `Matches candidate skills in ${candidateSkills.slice(0, 2).join(" & ")}.`),
-            keyRequirements: generateDynamicSkillsForJob(aiJob.keyRequirements, title, idx, candidateSkills),
-            jobDescription: String(aiJob.jobDescription || `${title} position at ${company} focusing on scalable software applications.`),
-            salaryRange: generateDynamicSalaryRange(aiJob.salaryRange || sJob.salaryRange),
-            link: normalizeJobLink(bestLink, title, company, platform)
-        });
-    });
-
-    // STRICT KEYWORD OVERLAP FILTER: Discard any jobs that do NOT share at least 1-2 core keywords with candidate profile
-    const strictMatchedJobs = mappedJobs.filter(j => hasKeywordOverlap(j, candidateSkills, searchQuery));
-
-    console.log(`[Strict Keyword Filter] ${strictMatchedJobs.length} out of ${mappedJobs.length} jobs matched candidate keywords strictly.`);
-
-    // Sort the results strictly by Match Score in descending order
-    strictMatchedJobs.sort((a, b) => b.matchScore - a.matchScore);
-
-    const finalData = jobMatchResultSchema.parse({
-        searchQuery,
-        jobs: strictMatchedJobs
-    });
-
-    return finalData;
+    const validated = jobMatchResultSchema.parse({ searchQuery, jobs, internships: [] });
+    return { ...validated, diagnostics, scrapeFailed: false };
 }
 
 /**
@@ -376,10 +501,13 @@ Guidelines:
 - Highlight candidate's specific relevant experience/skills matching ${jobTitle}.
 - Keep paragraph short, compelling, human-written (not sounding like generic template).
 - Include clear call-to-action for a 10-min chat or review of resume.
+- Only reference experience that actually appears in the applicant profile.
+- Never invent contact details. Do not add a website, portfolio URL, phone number, LinkedIn handle or email to the signature unless that exact detail appears in the applicant profile. Sign off with the applicant's name alone if that is all you have.
+- Do not invent employers, job titles, degrees, certifications or metrics that the profile does not state.
 `;
 
     const interaction = await ai.interactions.create({
-        model: "gemini-3.5-flash",
+        model: MODEL,
         input: prompt,
         response_format: {
             type: "text",
@@ -394,5 +522,6 @@ Guidelines:
 
 module.exports = {
     generateJobMatches,
-    generateColdEmail
+    generateColdEmail,
+    scoreByOverlap
 };

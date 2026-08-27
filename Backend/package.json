@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "npx nodemon server.js"
+    "dev": "npx nodemon server.js",
+    "start": "node server.js",
+    "install:browsers": "playwright install chromium",
+    "postinstall": "playwright install chromium || echo \"Playwright chromium download failed - scrapers will fall back to Puppeteer's Chrome\""
   },
   "keywords": [],
   "author": "",

@@ -33,7 +33,15 @@ const Home = () => {
             navigate('/jobs', {
                 state: {
                     jobs: data.jobs,
-                    searchQuery: data.searchQuery
+                    searchQuery: data.searchQuery,
+                    // Carried through so the results page can say which boards were
+                    // unreachable, instead of presenting a partial list as complete.
+                    diagnostics: data.diagnostics,
+                    // The cold-email step needs the candidate's own words, otherwise it
+                    // has to invent a background for them.
+                    resumeText: data.resumeText || '',
+                    selfDescription,
+                    notice: data.jobs?.length ? null : data.message
                 }
             })
         } catch (error) {
@@ -140,14 +148,14 @@ const Home = () => {
 
                 {/* Card Footer */}
                 <div className='interview-card__footer'>
-                    <span className='footer-info'>AI-Powered Strategy Generation &amp; Multi-Platform Job Finder &bull; Approx 30s</span>
+                    <span className='footer-info'>AI-Powered Strategy Generation &amp; Multi-Platform Job Finder &bull; Approx 60s</span>
                     <div className='action-buttons'>
                         <button
                             onClick={handleJobs}
                             disabled={findingJobs}
                             className='generate-btn'>
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" /></svg>
-                            {findingJobs ? 'Finding Jobs...' : 'Find me Jobs'}
+                            {findingJobs ? 'Finding Jobs...' : 'Find Jobs'}
                         </button>
                         <button
                             onClick={handleGenerateReport}
