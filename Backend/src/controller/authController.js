@@ -38,7 +38,12 @@ async function register(req, res) {
     username: user.username
   }, process.env.JWT || "secret", { expiresIn: "1d" });
 
-  res.cookie("token", token);
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    maxAge: 24 * 60 * 60 * 1000
+  });
 
   res.status(201).json({
     message: "Registered successfully!",
@@ -84,7 +89,12 @@ async function login(req, res) {
     username: user.username
   }, process.env.JWT || "secret", { expiresIn: "1d" });
 
-  res.cookie("token", token);
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    maxAge: 24 * 60 * 60 * 1000
+  });
 
   res.status(200).json({
     message: "Logged in successfully",
@@ -102,7 +112,11 @@ const logout = async (req, res) => {
     await blackListModel.create({ token });
   }
 
-  res.clearCookie("token");
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none"
+  });
 
   return res.status(200).json({
     message: "Logout Successfully!",
