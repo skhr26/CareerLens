@@ -54,8 +54,8 @@ async function getJobMatchesController(req, res) {
         // telling users "no matches" when Chromium failed to launch sends them off to
         // rewrite a resume that was never the problem.
         if (matchResults.scrapeFailed) {
-            return res.status(503).json({
-                message: "Job search is temporarily unavailable — we could not reach the job boards. Please try again shortly.",
+            return res.status(200).json({
+                message: "Job scraping is not available on the hosted version. Please run the app locally to use this feature.",
                 searchQuery: matchResults.searchQuery,
                 jobs: [],
                 internships: [],
